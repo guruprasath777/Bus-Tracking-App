@@ -41,116 +41,114 @@
         Error Message
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+<!-- Leaflet CSS & JS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-        // IMPORTANT: These global variables are provided by the environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+<!-- Firebase + Leaflet Integration -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js";
 
-        let db, auth;
-        let map, marker;
+    // 🔹 Firebase config (yours)
+    const firebaseConfig = {
+        apiKey: "AIzaSyCHycTJjSSXdXyx61t8KyYyPW5yraKC8Sg",
+        authDomain: "bus-tracking-8c9e2.firebaseapp.com",
+        projectId: "bus-tracking-8c9e2",
+        storageBucket: "bus-tracking-8c9e2.appspot.com",
+        messagingSenderId: "83814419951",
+        appId: "1:83814419951:web:a4bd1760d39f51464b3a1a",
+        measurementId: "G-9E055HM4QJ"
+    };
 
-        const messageBox = document.getElementById('message-box');
-        const trackButton = document.getElementById('trackButton');
-        const driverIdInput = document.getElementById('driverIdInput');
+    let db, auth;
+    let map, marker;
+    let unsubscribe;
 
-        function showMessage(message, isError = true) {
-            messageBox.textContent = message;
-            messageBox.className = `fixed bottom-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full shadow-lg z-50 transform scale-100 transition-transform duration-300 ease-in-out ${isError ? 'bg-red-500' : 'bg-green-500'} text-white`;
-            setTimeout(() => {
-                messageBox.classList.remove('scale-100');
-                messageBox.classList.add('scale-0');
-            }, 3000);
+    const messageBox = document.getElementById('message-box');
+    const trackButton = document.getElementById('trackButton');
+    const driverIdInput = document.getElementById('driverIdInput');
+
+    function showMessage(message, isError = true) {
+        messageBox.textContent = message;
+        messageBox.className = `fixed bottom-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full shadow-lg z-50 transform scale-100 transition-transform duration-300 ease-in-out ${isError ? 'bg-red-500' : 'bg-green-500'} text-white`;
+        setTimeout(() => {
+            messageBox.classList.remove('scale-100');
+            messageBox.classList.add('scale-0');
+        }, 3000);
+    }
+
+    async function initFirebase() {
+        try {
+            const app = initializeApp(firebaseConfig);
+            getAnalytics(app);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            await signInAnonymously(auth);
+            console.log("Firebase initialized successfully.");
+        } catch (error) {
+            console.error("Firebase initialization failed:", error);
+            showMessage("Failed to connect to backend.");
         }
+    }
 
-        async function initFirebase() {
-            try {
-                setLogLevel('debug');
-                const app = initializeApp(firebaseConfig);
-                auth = getAuth(app);
-                db = getFirestore(app);
+    function initMap() {
+        const defaultPos = [37.7749, -122.4194]; // Default San Francisco
 
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Firebase initialization failed:", error);
-                showMessage("Failed to connect to backend.");
-            }
-        }
+        // Create Leaflet map
+        map = L.map('map').setView(defaultPos, 15);
+
+        // Add OSM tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Create marker at default pos
+        marker = L.marker(defaultPos).addTo(map).bindPopup("Bus Location");
         
-        // Google Maps API
-        let googleMapsLoaded = false;
-        const googleMapsApiKey = "YOUR_GOOGLE_MAPS_API_KEY"; // REPLACE THIS WITH YOUR OWN API KEY
+        showMessage("Map loaded. Enter a Driver ID and press 'Start Tracking'", false);
+    }
 
-        function loadGoogleMapsScript() {
-            if (googleMapsLoaded) return;
-            const script = document.createElement('script');
-            script.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&callback=initMap`;
-            script.async = true;
-            document.head.appendChild(script);
-            googleMapsLoaded = true;
+    function startTracking() {
+        const driverId = driverIdInput.value.trim();
+        if (!driverId) {
+            showMessage("Please enter a Driver ID.");
+            return;
         }
 
-        function initMap() {
-            const defaultPos = { lat: 37.7749, lng: -122.4194 }; // San Francisco
-            map = new google.maps.Map(document.getElementById("map"), {
-                zoom: 15,
-                center: defaultPos,
-                mapId: "DEMO_MAP_ID" // A map ID is recommended for modern Google Maps features
-            });
+        if (unsubscribe) unsubscribe(); // cleanup old listener
 
-            marker = new google.maps.Marker({
-                map: map,
-                title: "Bus Location"
-            });
-            showMessage("Map loaded. Enter a User ID and press 'Start Tracking'", false);
-        }
+        // 🔹 Correct Firestore path → users/{driverId}/location
+        const locationDocRef = doc(db, 'users', driverId, 'location');
 
-        function startTracking() {
-            const driverId = driverIdInput.value.trim();
-            if (!driverId) {
-                showMessage("Please enter a Driver User ID.");
-                return;
+        unsubscribe = onSnapshot(locationDocRef, (docSnapshot) => {
+            if (docSnapshot.exists()) {
+                const data = docSnapshot.data();
+                const pos = [data.latitude, data.longitude];
+
+                marker.setLatLng(pos).bindPopup("Bus Location").openPopup();
+                map.setView(pos, 15);
+
+                showMessage(`Bus located at ${pos[0].toFixed(6)}, ${pos[1].toFixed(6)}`, false);
+            } else {
+                showMessage("Bus not found or location not shared.");
             }
+        }, (error) => {
+            console.error("Failed to get location updates:", error);
+            showMessage("Failed to retrieve location updates.");
+        });
 
-            if (!googleMapsLoaded) {
-                 loadGoogleMapsScript();
-                 window.initMap = initMap;
-            }
+        showMessage(`Tracking started for Driver ID: ${driverId}`, false);
+    }
 
-            const locationDocRef = doc(db, `artifacts/${appId}/users/${driverId}/location`, 'current');
-            
-            // Listen for real-time updates
-            onSnapshot(locationDocRef, (docSnapshot) => {
-                if (docSnapshot.exists()) {
-                    const data = docSnapshot.data();
-                    const pos = { lat: data.latitude, lng: data.longitude };
-                    marker.setPosition(pos);
-                    map.setCenter(pos);
-                    showMessage(`Bus located at ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`, false);
-                } else {
-                    showMessage("Bus not found or location is not being shared.");
-                }
-            }, (error) => {
-                console.error("Failed to get location updates:", error);
-                showMessage("Failed to retrieve location updates.");
-            });
-            showMessage(`Tracking started for User ID: ${driverId}`, false);
-        }
-
-        window.onload = async () => {
-            await initFirebase();
-            trackButton.addEventListener('click', startTracking);
-        };
-    </script>
+    window.onload = async () => {
+        await initFirebase();
+        initMap();
+        trackButton.addEventListener('click', startTracking);
+    };
+</script>
 
 </body>
 </html>
