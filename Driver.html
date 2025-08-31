@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver - Share Location</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <!-- Main Card -->
+    <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-lg">
+        <h2 class="text-2xl font-bold mb-4 text-gray-800 text-center">Driver Page</h2>
+        
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Your User ID (Share this with students):</label>
+            <div id="userIdDisplay" class="bg-gray-200 text-gray-800 p-3 rounded-lg text-sm break-all">Loading...</div>
+        </div>
+
+        <button id="toggleButton" class="w-full bg-indigo-600 text-white font-semibold py-3 px-6 rounded-full hover:bg-indigo-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2" disabled>
+            Loading...
+        </button>
+
+        <div id="status" class="mt-4 p-3 text-center text-sm font-medium rounded-lg text-gray-600 bg-gray-100">
+            Not started
+        </div>
+    </div>
+
+    <!-- Message Box -->
+    <div id="message-box" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-lg z-50 transform scale-0 transition-transform duration-300 ease-in-out">
+        Error Message
+    </div>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+          apiKey: "AIzaSyCHycTJjSSXdXyx61t8KyYyPW5yraKC8Sg",
+          authDomain: "bus-tracking-8c9e2.firebaseapp.com",
+          databaseURL: "https://bus-tracking-8c9e2-default-rtdb.firebaseio.com",
+          projectId: "bus-tracking-8c9e2",
+          storageBucket: "bus-tracking-8c9e2.firebasestorage.app",
+          messagingSenderId: "83814419951",
+          appId: "1:83814419951:web:a4bd1760d39f51464b3a1a",
+          measurementId: "G-9E055HM4QJ"
+        };
+
+        const appId = firebaseConfig.appId;
+        
+        let db, auth;
+        let watchId = null;
+        let userId = null;
+        let isAuthReady = false;
+
+        const toggleButton = document.getElementById('toggleButton');
+        const statusElement = document.getElementById('status');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const messageBox = document.getElementById('message-box');
+
+        /**
+         * Displays a temporary message box for user feedback.
+         * @param {string} message The message to display.
+         * @param {boolean} isError True for an error message (red), false for success (green).
+         */
+        function showMessage(message, isError = true) {
+            messageBox.textContent = message;
+            messageBox.className = `fixed bottom-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full shadow-lg z-50 transform scale-100 transition-transform duration-300 ease-in-out ${isError ? 'bg-red-500' : 'bg-green-500'} text-white`;
+            setTimeout(() => {
+                messageBox.classList.remove('scale-100');
+                messageBox.classList.add('scale-0');
+            }, 3000);
+        }
+
+        async function initFirebase() {
+            try {
+                setLogLevel('debug');
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Wait for auth state to be ready and get the user ID
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userIdDisplay.textContent = userId;
+                        showMessage("Firebase connection successful.", false);
+                    } else {
+                        userId = null;
+                        userIdDisplay.textContent = 'Not authenticated';
+                        showMessage("Firebase authentication failed.");
+                    }
+                    isAuthReady = true;
+                    updateButtonState();
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                showMessage("Failed to connect to backend. Check the console for details.");
+            }
+        }
+
+        function updateButtonState() {
+            if (isAuthReady) {
+                toggleButton.disabled = false;
+                toggleButton.textContent = "Start Sharing Location";
+            }
+        }
+
+        async function updateLocation(position) {
+            if (!userId) {
+                console.error("User ID is not available. Cannot update location.");
+                showMessage("User not authenticated. Please log in.");
+                return;
+            }
+
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            try {
+                await setDoc(doc(db, `artifacts/${appId}/users/${userId}/location`, 'current'), {
+                    latitude: lat,
+                    longitude: lng,
+                    timestamp: Date.now()
+                });
+                statusElement.textContent = `Updated: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+                showMessage("Location updated.", false);
+            } catch (e) {
+                console.error("Error writing document: ", e);
+                showMessage("Failed to update location in Firestore.");
+            }
+        }
+
+        function toggleSharing() {
+            if (!isAuthReady) {
+                showMessage("Firebase is not ready yet. Please wait.");
+                return;
+            }
+
+            if (watchId === null) {
+                if (navigator.geolocation) {
+                    watchId = navigator.geolocation.watchPosition(updateLocation, (error) => {
+                        console.error("Geolocation error:", error);
+                        showMessage("Geolocation error: " + error.message);
+                    }, {
+                        enableHighAccuracy: true,
+                        maximumAge: 0
+                    });
+                    toggleButton.textContent = "Stop Sharing Location";
+                    toggleButton.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+                    toggleButton.classList.add('bg-red-500', 'hover:bg-red-600');
+                    statusElement.textContent = "Sharing location...";
+                    showMessage("Location sharing started.", false);
+                } else {
+                    showMessage("Geolocation not supported by your browser.");
+                }
+            } else {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+                toggleButton.textContent = "Start Sharing Location";
+                toggleButton.classList.remove('bg-red-500', 'hover:bg-red-600');
+                toggleButton.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
+                statusElement.textContent = "Not sharing.";
+                showMessage("Location sharing stopped.", false);
+            }
+        }
+
+        window.onload = async () => {
+            await initFirebase();
+            toggleButton.addEventListener('click', toggleSharing);
+        };
+    </script>
+</body>
+</html>

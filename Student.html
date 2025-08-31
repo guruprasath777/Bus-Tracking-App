@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student - Track Bus</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <!-- Main Card -->
+    <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-2xl mb-4">
+        <h2 class="text-2xl font-bold mb-4 text-gray-800 text-center">Student Page</h2>
+
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
+            <input type="text" id="driverIdInput" placeholder="Enter Driver User ID" class="flex-grow p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <button id="trackButton" class="bg-indigo-600 text-white font-semibold py-3 px-6 rounded-full w-full sm:w-auto hover:bg-indigo-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                Start Tracking
+            </button>
+        </div>
+
+        <div id="map" class="rounded-lg shadow-inner"></div>
+    </div>
+
+    <!-- Message Box -->
+    <div id="message-box" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-lg z-50 transform scale-0 transition-transform duration-300 ease-in-out">
+        Error Message
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // IMPORTANT: These global variables are provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth;
+        let map, marker;
+
+        const messageBox = document.getElementById('message-box');
+        const trackButton = document.getElementById('trackButton');
+        const driverIdInput = document.getElementById('driverIdInput');
+
+        function showMessage(message, isError = true) {
+            messageBox.textContent = message;
+            messageBox.className = `fixed bottom-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full shadow-lg z-50 transform scale-100 transition-transform duration-300 ease-in-out ${isError ? 'bg-red-500' : 'bg-green-500'} text-white`;
+            setTimeout(() => {
+                messageBox.classList.remove('scale-100');
+                messageBox.classList.add('scale-0');
+            }, 3000);
+        }
+
+        async function initFirebase() {
+            try {
+                setLogLevel('debug');
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                showMessage("Failed to connect to backend.");
+            }
+        }
+        
+        // Google Maps API
+        let googleMapsLoaded = false;
+        const googleMapsApiKey = "YOUR_GOOGLE_MAPS_API_KEY"; // REPLACE THIS WITH YOUR OWN API KEY
+
+        function loadGoogleMapsScript() {
+            if (googleMapsLoaded) return;
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&callback=initMap`;
+            script.async = true;
+            document.head.appendChild(script);
+            googleMapsLoaded = true;
+        }
+
+        function initMap() {
+            const defaultPos = { lat: 37.7749, lng: -122.4194 }; // San Francisco
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 15,
+                center: defaultPos,
+                mapId: "DEMO_MAP_ID" // A map ID is recommended for modern Google Maps features
+            });
+
+            marker = new google.maps.Marker({
+                map: map,
+                title: "Bus Location"
+            });
+            showMessage("Map loaded. Enter a User ID and press 'Start Tracking'", false);
+        }
+
+        function startTracking() {
+            const driverId = driverIdInput.value.trim();
+            if (!driverId) {
+                showMessage("Please enter a Driver User ID.");
+                return;
+            }
+
+            if (!googleMapsLoaded) {
+                 loadGoogleMapsScript();
+                 window.initMap = initMap;
+            }
+
+            const locationDocRef = doc(db, `artifacts/${appId}/users/${driverId}/location`, 'current');
+            
+            // Listen for real-time updates
+            onSnapshot(locationDocRef, (docSnapshot) => {
+                if (docSnapshot.exists()) {
+                    const data = docSnapshot.data();
+                    const pos = { lat: data.latitude, lng: data.longitude };
+                    marker.setPosition(pos);
+                    map.setCenter(pos);
+                    showMessage(`Bus located at ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}`, false);
+                } else {
+                    showMessage("Bus not found or location is not being shared.");
+                }
+            }, (error) => {
+                console.error("Failed to get location updates:", error);
+                showMessage("Failed to retrieve location updates.");
+            });
+            showMessage(`Tracking started for User ID: ${driverId}`, false);
+        }
+
+        window.onload = async () => {
+            await initFirebase();
+            trackButton.addEventListener('click', startTracking);
+        };
+    </script>
+
+</body>
+</html>
